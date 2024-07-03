@@ -2,6 +2,7 @@
 # requires nftables and ipset
 
 
+
 clean_tables () {
 	echo "Cleaning captive-portal rules"
 	nft flush chain inet pirania prerouting
