@@ -230,5 +230,11 @@ src/gz libremesh_libremesh http://downloads.openwrt.org/releases/19.07.10/packag
 src/gz libremesh_profiles http://downloads.openwrt.org/releases/19.07.10/packages/mipsel_24kc/profiles
 ```
 
-#### 2) 
-
+#### 2)  * satisfy_dependencies_for: Cannot satisfy the following dependencies for pirania:
+```
+Collected errors:
+ * satisfy_dependencies_for: Cannot satisfy the following dependencies for pirania:
+ *      kernel (= 4.14.275-1-0ef95951f9c50027daa16a88bbd32c37)
+ * opkg_install_cmd: Cannot install package pirania.
+```
+Add the parameter `--force-depends` in `opkg install pirania`. **Warning - it can brick your router**
