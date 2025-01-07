@@ -24,9 +24,10 @@ set_nftables () {
 	nft create table inet pirania
 	# Create default tables and chains
 	nft add table inet pirania
-	nft add chain inet pirania prerouting { type nat hook prerouting priority 0 \; }
-	nft add chain inet pirania input { type filter hook input priority 0 \; }
-	nft add chain inet pirania forward { type filter hook forward priority 0 \; }
+	nft add chain inet pirania prerouting { type nat hook prerouting priority filter - 1 \; policy accept \; }
+	nft add chain inet pirania input { type filter hook input priority filter \; policy accept \; }
+	nft add chain inet pirania forward { type filter hook forward priority filter \; policy accept \; }
+	nft add chain inet pirania postrouting { type nat hook postrouting priority srcnat \; policy accept \; }
 
   	# Add mac-adress set
   	nft add set inet pirania pirania-auth-macs { type ether_addr\; }
@@ -39,16 +40,19 @@ set_nftables () {
 	# Only accept packets from interfaces defined in catch_bridged_interfaces
 	catch_interfaces=$(uci get pirania.base_config.catch_bridged_interfaces | sed 's/ /,/g')
 
-	# Stop processing the chain for authorized macs and allowed ips (so they are accepted)
-	nft add rule inet pirania prerouting ether saddr @pirania-auth-macs ct state new,established,related counter log prefix "ValidSMAC" accept
-	nft add rule inet pirania prerouting ip daddr @pirania-allowlist-ipv4 ct state new,established,related counter log prefix "ACCEPT-ipv4" accept
-	nft add rule inet pirania prerouting ip6 daddr @pirania-allowlist-ipv6 ct state new,established,related counter log prefix "ACCEPT-ipv6" accept
+	nft add rule inet pirania prerouting ip protocol udp udp dport 53 ether saddr != @pirania-auth-macs ct state new redirect to :59053
+	nft add rule inet pirania prerouting ip protocol tcp tcp dport { 80, 443 } ether saddr != @pirania-auth-macs ct state new limit rate 10/second redirect to :59080
 
-	# Send DNS requests, that are not from valid ips or macs, to our own captive portal DNS at 59053
-	nft add rule inet pirania prerouting meta l4proto udp udp dport 53 ether saddr != @pirania-auth-macs ct state new limit rate 10/second counter log prefix "SMACDNS"  redirect to :59053
-	# Redirect packets with dest port 80 to port 59080 of this host (the captive portal page).
-	nft add rule inet pirania prerouting meta l4proto tcp tcp dport 80 ether saddr != @pirania-auth-macs ct state new limit rate 10/second counter log prefix "SMACHTTP"  redirect to :59080
+	nft add rule inet pirania forward ether saddr @pirania-auth-macs accept
+	nft add rule inet pirania forward ct state established,related accept
+	nft add rule inet pirania forward tcp dport 22 accept
+	nft add rule inet pirania forward udp dport { 53, 67-68 } accept
+	nft add rule inet pirania forward udp sport { 53, 67-68 } accept
+	nft add rule inet pirania forward ip saddr @pirania-allowlist-ipv4 accept
+	nft add rule inet pirania forward ip daddr @pirania-allowlist-ipv4 accept
+	nft add rule inet pirania forward log prefix \"DROPPED_FORWARD\" drop
 
+	nft add rule inet pirania postrouting oifname eth0 masquerade
 }
 
 update_ipsets () {
