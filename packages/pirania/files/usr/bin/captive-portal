@@ -12,22 +12,14 @@ clean_tables () {
 
 set_nftables () { 
 	echo "Apply captive-portal rules"
-	# Detect wheter add or insert rules
-	#append_nft_rules=$(uci get pirania.base_config.append_nft_rules 2> /dev/null)
-	#if [ "$append_nft_rules" = "1" ] ; then
-	#	op="add rule"
-	#else
-	#	op="insert rule"
-	#fi
 
 	# Create pirania tables	
 	nft create table inet pirania
 	# Create default tables and chains
 	nft add table inet pirania
-	nft add chain inet pirania prerouting { type nat hook prerouting priority filter - 1 \; policy accept \; }
-	nft add chain inet pirania input { type filter hook input priority filter \; policy accept \; }
-	nft add chain inet pirania forward { type filter hook forward priority filter \; policy accept \; }
-	nft add chain inet pirania postrouting { type nat hook postrouting priority srcnat \; policy accept \; }
+	nft add chain inet pirania prerouting { type nat hook prerouting priority -1 \; }
+	nft add chain inet pirania input { type filter hook input priority 0 \; }
+	nft add chain inet pirania forward { type filter hook forward priority 0 \; }
 
   	# Add mac-adress set
   	nft add set inet pirania pirania-auth-macs { type ether_addr\; }
@@ -40,43 +32,50 @@ set_nftables () {
 	# Only accept packets from interfaces defined in catch_bridged_interfaces
 	catch_interfaces=$(uci get pirania.base_config.catch_bridged_interfaces | sed 's/ /,/g')
 
+	# Flush existing prerouting chain to remove old rules
+	nft flush chain inet pirania prerouting
+
+	# Add new prerouting rules
+	nft add rule inet pirania prerouting tcp dport 22 accept
+	nft add rule inet pirania prerouting udp dport 67-68 accept
+	nft add rule inet pirania prerouting udp sport 67-68 accept
+	nft add rule inet pirania prerouting udp sport 53 accept
+	nft add rule inet pirania prerouting ether saddr @pirania-auth-macs accept
+	nft add rule inet pirania prerouting ether daddr @pirania-auth-macs accept 
 	nft add rule inet pirania prerouting ip protocol udp udp dport 53 ether saddr != @pirania-auth-macs ct state new redirect to :59053
 	nft add rule inet pirania prerouting ip protocol tcp tcp dport { 80, 443 } ether saddr != @pirania-auth-macs ct state new limit rate 10/second redirect to :59080
 
+	# Flush existing forward chain
+	nft flush chain inet pirania forward
+
+	# Add new forward chain rules
 	nft add rule inet pirania forward ether saddr @pirania-auth-macs accept
 	nft add rule inet pirania forward ct state established,related accept
-	nft add rule inet pirania forward tcp dport 22 accept
-	nft add rule inet pirania forward udp dport { 53, 67-68 } accept
-	nft add rule inet pirania forward udp sport { 53, 67-68 } accept
-	nft add rule inet pirania forward ip saddr @pirania-allowlist-ipv4 accept
 	nft add rule inet pirania forward ip daddr @pirania-allowlist-ipv4 accept
-	nft add rule inet pirania forward log prefix \"DROPPED_FORWARD\" drop
-
-	nft add rule inet pirania postrouting oifname eth0 masquerade
+	#nft add rule inet pirania forward ip6 daddr @pirania-allowlist-ipv6 accept
+	nft add rule inet pirania forward log prefix "DROPPED_FORWARD" drop
 }
-
 update_ipsets () {
 
-  # Create tables and sets
-  echo "Updating captive-portal rules"
+	# Create tables and sets
+	echo "Updating captive-portal rules"
 
-  # Add authorized MAC addresses
-  for mac in $(pirania_authorized_macs) ; do
-    nft add element inet pirania pirania-auth-macs {$mac}
-	echo "Adicionando enderecos:" $mac
-  done
+	# Add authorized MAC addresses
+	for mac in $(pirania_authorized_macs) ; do
+		nft add element inet pirania pirania-auth-macs {$mac}
+	done
 
-  # Update pirania-allowlist sets for ipv4 and ipv6
-  nft flush set inet pirania pirania-allowlist-ipv4
-  nft flush set inet pirania pirania-allowlist-ipv6
-  
-  # Add allowed ip/prefixes
-  # Get values from allowlist_ipvX and add to pirania-allowlist-ipvX set
-  ipv4allowlist=$(uci get pirania.base_config.allowlist_ipv4 | sed 's/ /,/g')
-  nft add element inet pirania pirania-allowlist-ipv4 {$ipv4allowlist}
+	# Update pirania-allowlist sets for ipv4 and ipv6
+	nft flush set inet pirania pirania-allowlist-ipv4
+	nft flush set inet pirania pirania-allowlist-ipv6
+	
+	# Add allowed ip/prefixes
+	# Get values from allowlist_ipvX and add to pirania-allowlist-ipvX set
+	ipv4allowlist=$(uci get pirania.base_config.allowlist_ipv4 | sed 's/ /,/g')
+	nft add element inet pirania pirania-allowlist-ipv4 {$ipv4allowlist}
 
-  ipv6allowlist=$(uci get pirania.base_config.allowlist_ipv6 | sed 's/ /,/g')
-  nft add element inet pirania pirania-allowlist-ipv6 {$ipv6allowlist}
+	ipv6allowlist=$(uci get pirania.base_config.allowlist_ipv6 | sed 's/ /,/g')
+	nft add element inet pirania pirania-allowlist-ipv6 {$ipv6allowlist}
 }
 
 # check if captive-portal is enabled in /etc/config/pirania
@@ -103,6 +102,11 @@ elif [ "$enabled" = "1" ]; then
 #	set_nftables
 	update_ipsets
 	exit
+elif [ "$1" = "enabled" ]; then
+	uci set pirania.base_config.enabled='1'
+	# i/o error in my device - check later
+	#uci commit
+	echo "Captive-portal is now enabled"
 else
 	echo "Pirania captive-portal is disabled. Try running captive-portal start"
 	exit
