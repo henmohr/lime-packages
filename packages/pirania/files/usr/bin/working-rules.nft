@@ -1,7 +1,6 @@
 table inet pirania {
 	set pirania-auth-macs {
 		type ether_addr
-		elements = { a6:37:9c:fa:e2:55 }
 	}
 
 	set pirania-allowlist-ipv4 {
